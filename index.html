@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            background: black;
+        }
+
+        #graph {
+            margin-top: -20px;
+            width: 720px;
+            height: 720px;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <script src="jquery.min.js"></script>
+
+    <div id="panel">
+        <svg id="graph"></svg>
+    </div>
+
+    <script>
+        'use strict';
+
+        const debug = false;
+        const weatherApiKey = '';
+        const weatherApiCity = '';
+
+        let psCache = null;
+        let weatherCache = null;
+
+        let prevHtml = '';
+
+        const draw = () => {
+            const now = new Date();
+
+            const elements = [];
+            const size = $('#graph').width();
+            const stroke = 4.5;
+
+            {
+                // date
+
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()];
+
+                const vt = year + '-' + month + '-' + day;
+                const vb = weekday;
+                const x = size / 10;
+                const yt = 2 * size / 15;
+                const yb = 2 * size / 9;
+                const sizet = size / 15;
+                const sizeb = size / 10;
+
+                elements.push(`<text x="${x}" y="${yt}" style="dominant-baseline: central; font-family: 'Noto Sans'; font-size: ${sizet}; font-weight: 300; fill: white">${vt}</text>`);
+                elements.push(`<text x="${x}" y="${yb}" style="dominant-baseline: central; font-family: 'Noto Sans'; font-size: ${sizeb}; font-weight: 200; letter-spacing: -0.025em; fill: white">${vb}</text>`);
+            }
+
+            {
+                // time
+
+                const hour = String(now.getHours()).padStart(2, '0');
+                const minute = String(now.getMinutes()).padStart(2, '0');
+                const second = String(now.getSeconds()).padStart(2, '0');
+
+                const x = 22 * size / 45;
+                const y = size / 2;
+                const sizehm = size / 4;
+                const sizes = size / 6;
+
+                elements.push(`<text x="${x}" y="${y}" style="dominant-baseline: middle; text-anchor: end; font-family: 'Noto Sans'; font-size: ${sizehm}; font-weight: 100; letter-spacing: -0.1em; fill: white">${hour}</text>`);
+                elements.push(`<text x="${x}" y="${y}" transform="rotate(5 ${x} ${y})" style="font-family: 'Noto Sans'; font-size: ${sizehm}; font-weight: 150; letter-spacing: -0.1em; fill: hsl(0, 100%, 60%)">${minute}</text>`);
+                elements.push(`<text x="${x}" y="${y}" style="dominant-baseline: hanging; font-family: 'Noto Sans'; font-size: ${sizes}; font-weight: 150; letter-spacing: -0.1em; fill: white">${second}</text>`);
+            }
+
+            {
+                // alarm
+
+                const wd = now.getDay();
+                const hms = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                let event = null;
+                let target = null;
+
+                if (hms >= 11 * 3600 + 55 * 60 && hms < 12 * 3600 + 5 * 60) {
+                    event = '午饭';
+                    target = 12 * 3600;
+                }
+
+                if (debug) {
+                    event = '测试';
+                    target = 17 * 3600 + 30 * 60;
+                }
+
+                if (event && now.getMilliseconds() < 500) {
+                    const countdown = Math.max(target - hms, 0);
+                    const minute = String(Math.floor(countdown / 60)).padStart(2, '0');
+                    const second = String(countdown % 60).padStart(2, '0');
+
+                    const vt = minute + ':' + second;
+                    const vb = event;
+                    const x = 9 * size / 10;
+                    const yt = 2 * size / 15;
+                    const yb = 2 * size / 9;
+                    const sizet = size / 15;
+                    const sizeb = size / 10;
+
+                    elements.push(`<text x="${x}" y="${yt}" style="dominant-baseline: central; text-anchor: end; font-family: 'Noto Sans'; font-size: ${sizet}; font-weight: 300; fill: white">${vt}</text>`);
+                    elements.push(`<text x="${x}" y="${yb}" style="dominant-baseline: central; text-anchor: end; font-family: 'Noto Sans CJK SC'; font-size: ${sizeb}; font-weight: 200; letter-spacing: -0.025em; fill: white">${vb}</text>`);
+                }
+            }
+
+            if (psCache) {
+                for (let i = 0; i < 2; ++i) {
+                    // ps indicator
+
+                    const ratio1 = [psCache.cpu_all, psCache.memory_all][i];
+                    const ratio2 = [psCache.cpu_user, psCache.memory_used][i];
+
+                    const xm = [1, 9][i] * size / 10;
+                    const xtb = [1, 5][i] * size / 6;
+                    const yt = 2 * size / 5;
+                    const ym = size / 2;
+                    const yb = 3 * size / 5;
+                    const y1 = (3 - ratio1) * size / 5;
+                    const y2 = (3 - ratio2) * size / 5;
+                    const sizeb = size / 15;
+
+                    elements.push(`<path id="ps${i}" d="M ${xtb} ${yt} L ${xm} ${ym} L ${xtb} ${yb}" style="fill: none" />`);
+                    elements.push(`<clipPath id="ps${i}t"><rect x="0" y="${yt}" width="${size}" height="${y1 - yt}" /></clipPath>`);
+                    elements.push(`<clipPath id="ps${i}m"><rect x="0" y="${y1}" width="${size}" height="${y2 - y1}" /></clipPath>`);
+                    elements.push(`<clipPath id="ps${i}b"><rect x="0" y="${y2}" width="${size}" height="${yb - y2}" /></clipPath>`);
+                    elements.push(`<use href="#ps${i}" clip-path="url(#ps${i}t)" style="fill: none; stroke: hsl(0, 0%, 40%); stroke-width: ${stroke}" />`);
+                    elements.push(`<use href="#ps${i}" clip-path="url(#ps${i}m)" style="fill: none; stroke: hsl(0, 100%, 60%); stroke-width: ${stroke}" />`);
+                    elements.push(`<use href="#ps${i}" clip-path="url(#ps${i}b)" style="fill: none; stroke: white; stroke-width: ${stroke}" />`);
+
+                    if (i) {
+                        elements.push(`<text x="${xtb}" y="${yb}" style="dominant-baseline: hanging; text-anchor: end; font-family: 'Noto Sans'; font-size: ${sizeb}; font-weight: 300; fill: white">M</text>`);
+                    } else {
+                        elements.push(`<text x="${xtb}" y="${yb}" style="dominant-baseline: hanging; font-family: 'Noto Sans'; font-size: ${sizeb}; font-weight: 300; fill: white">P</text>`);
+                    }
+                }
+            }
+
+            if (weatherCache) {
+                {
+                    // weather icon
+
+                    const icon = 'weather-icon/' + weatherCache.current.condition.code + ['_night.png', '_day.png'][weatherCache.current.is_day];
+                    const x = size / 10;
+                    const y = 7 * size / 10;
+                    const sizei = size / 5;
+
+                    elements.push(`<image x="${x}" y="${y}" width="${sizei}" height="${sizei}" href="${icon}" />`);
+                }
+
+                {
+                    // weather today
+
+                    const vm = weatherCache.current.temp_c.toFixed(1);
+                    const vt = weatherCache.forecast.forecastday[0].day.maxtemp_c.toFixed(1);
+                    const vb = weatherCache.forecast.forecastday[0].day.mintemp_c.toFixed(1);
+                    const x = 3 * size / 10;
+                    const ym = 4 * size / 5;
+                    const yt = 11 * size / 15;
+                    const yb = 13 * size / 15;
+                    const sizem = size / 10;
+                    const sizetb = size / 20;
+
+                    elements.push(`<text x="${x}" y="${ym}" style="dominant-baseline: central; font-family: 'Noto Sans'; font-size: ${sizem}; font-weight: 200; letter-spacing: -0.025em; fill: white">${vm}</text>`);
+                    elements.push(`<text x="${x}" y="${yt}" style="dominant-baseline: central; font-family: 'Noto Sans'; font-size: ${sizetb}; font-weight: 400; fill: hsl(30, 100%, 60%)">${vt}</text>`);
+                    elements.push(`<text x="${x}" y="${yb}" style="dominant-baseline: central; font-family: 'Noto Sans'; font-size: ${sizetb}; font-weight: 400; fill: hsl(210, 100%, 60%)">${vb}</text>`);
+                }
+
+                for (let i = 0; i < 2; ++i) {
+                    for (let j = 0; j < 4; ++j) {
+                        // weather forecast
+
+                        const v = Math.round(weatherCache.forecast.forecastday[i].hour[3 * j + 9].temp_c);
+                        const x = [21, 23, 25, 27][j] * size / 30;
+                        const y = [35, 37][i] * size / 45;
+                        const sizev = size / 20;
+                        const l = 100 - 0.6 * weatherCache.forecast.forecastday[i].hour[3 * j + 9].chance_of_rain;
+
+                        elements.push(`<text x="${x}" y="${y}" style="dominant-baseline: central; text-anchor: end; font-family: 'Noto Sans'; font-size: ${sizev}; font-weight: 300; fill: hsl(210, 100%, ${l}%)">${v}</text>`);
+                    }
+
+                    const v = weatherCache.forecast.forecastday[i].date.slice(5);
+                    const x = 9 * size / 10;
+                    const y = [11, 13][i] * size / 15;
+                    const sizev = size / 20;
+
+                    elements.push(`<text x="${x}" y="${y}" style="dominant-baseline: central; text-anchor: end; font-family: 'Noto Sans'; font-size: ${sizev}; font-weight: 400; fill: hsl(0, 0%, 60%)">${v}</text>`);
+                }
+            }
+
+            if (debug) {
+                elements.push(`<path d="M 24 24 L 696 24 L 696 696 L 24 696 L 24 24" style="fill: none; stroke: red; stroke-width: 2" />`);
+                elements.push(`<path d="M 72 72 L 648 72 L 648 648 L 72 648 L 72 72 L 360 360" style="fill: none; stroke: red; stroke-width: 2" />`);
+            }
+
+            const html = elements.join('');
+
+            if (prevHtml !== html) {
+                $('#graph').html(html);
+                prevHtml = html;
+            }
+        };
+
+        const updatePs = () => {
+            $.getJSON('http://127.0.0.1:8080').done((ps) => {
+                psCache = ps;
+            }).fail((xhr) => {
+                psCache = null;
+                console.error(xhr);
+            });;
+        };
+
+        const updateWeather = () => {
+            $.getJSON('https://api.weatherapi.com/v1/forecast.json?' + $.param({
+                key: weatherApiKey,
+                q: weatherApiCity,
+                days: 2,
+            }, true)).done((weather) => {
+                weatherCache = weather;
+            }).fail((xhr) => {
+                console.error(xhr);
+            });
+        };
+
+        $('#panel').dblclick(() => {
+            $('#panel')[0].requestFullscreen();
+        });
+
+        updatePs();
+        updateWeather();
+        setInterval(draw, 50);
+        setInterval(updatePs, 1000);
+        setInterval(updateWeather, 300000);
+    </script>
+</body>
+</html>
